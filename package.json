@@ -1,0 +1,19 @@
+{
+  "name": "game-alpha",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "http-server",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Serhii Melnykov",
+  "license": "ISC",
+  "dependencies": {
+    "@capacitor/cli": "^5.5.1",
+    "@capacitor/core": "^5.5.1",
+    "http-server": "^14.1.1",
+    "phaser": "^3.70.0"
+  }
+}
