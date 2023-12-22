@@ -3,26 +3,17 @@ window.onload = () => {
   const playerSize = 64;
   const worldWidth = 1500;
   const worldHeight = 2500;
-  const playerDamage = 1;
-  const playerSpeed = 150;
-  const playerMomentumDecay = 0.94;
+  const groundLevel = 400;
 
   class Main extends Phaser.Scene {
     player;
-    playerMomentum = {
-      x: 0,
-      y: 0,
-    };
-    playerMoving = {
-      up: false,
-      left: false,
-      right: false,
-      down: false,
-    };
     cursors;
-    house;
+    base;
     crosshair;
-    isFiringMode;
+    isFiringMode = false;
+    isShooting = false;
+    shootingTimer;
+    shotInterval = 500;
     shots;
     enemies;
 
@@ -31,10 +22,6 @@ window.onload = () => {
     joystickBase;
     joystickThumb;
 
-    playerResources = {
-      stone: 0,
-      iron: 0,
-    };
     baseResources = {
       stone: 0,
       iron: 0,
@@ -44,26 +31,26 @@ window.onload = () => {
       this.load.image('sky', 'assets/sky-bg-0.jpg');
       this.load.image('cave', 'assets/cave-bg-0.png');
 
-      this.load.image('player', 'assets/player-miner-1.png');
+      this.load.image('player', 'assets/player-miner.png');
 
-      this.load.image('ground', 'assets/ground-bg-0.png');
-      this.load.image('stone', 'assets/stone-bg-0.png');
-      this.load.image('stone-up', 'assets/stone-bg-up.png');
-      this.load.image('stone-down', 'assets/stone-bg-down.png');
-      this.load.image('stone-left', 'assets/stone-bg-left.png');
-      this.load.image('stone-right', 'assets/stone-bg-right.png');
-      this.load.image('iron', 'assets/iron-bg-0.png');
-      this.load.image('dark', 'assets/dark-bg-0.png');
+      this.load.image('ground', 'assets/ground.png');
+      this.load.image('stone', 'assets/stone.png');
+      this.load.image('iron', 'assets/iron.png');
+      this.load.image('dark', 'assets/dark.png');
 
-      this.load.image('house', 'assets/castle.png');
+      this.load.image('base', 'assets/castle.png');
       this.load.image('crosshair', 'assets/pointer.png');
       this.load.image('orc', 'assets/orc.png');
-      this.load.image('shot', 'assets/laser.png');
+      this.load.image('arrow', 'assets/arrow.png');
+      this.load.image('test', 'assets/test.png');
+      this.load.image('cracks', 'assets/crack.png');
+      this.load.image('overlay', 'assets/overlay.png');
+      this.load.image('overlay-angle', 'assets/overlay-angle.png');
     }
 
     create() {
       this.createBackground();
-      this.createHouse();
+      this.createBase();
       this.createPlayer();
 
       this.createStaticBlocks();
@@ -79,41 +66,62 @@ window.onload = () => {
 
       this.setPhysics();
       this.setWaveInterval();
+      this.physics.world.createDebugGraphic();
     }
 
     createEnemies() {
-      this.enemies = this.physics.add.group({
-        classType: Phaser.Physics.Arcade.Image,
-        defaultKey: 'orc',
-      });
+      this.enemies = this.physics.add.group({ classType: OrcEnemie, defaultKey: 'enemie' });
     }
 
     createEnemiesWave() {
-      let enemie = this.enemies.get(0, 720);
-      this.physics.moveTo(enemie, 800, 720, 50);
-      enemie.setActive(true);
-      enemie.setVisible(true);
+      const enemie = this.enemies.get(0, groundLevel - playerSize, 'orc', 100);
+
+      enemie.body.setImmovable(true);
+      this.physics.moveTo(enemie, this.base.$.x, groundLevel - playerSize, 100);
     }
 
     createShots() {
       this.shots = this.physics.add.group({
         classType: Phaser.Physics.Arcade.Image,
-        defaultKey: 'shot',
+        defaultKey: 'arrow',
       });
 
-      this.input.on(
-        'pointerdown',
-        (pointer) => {
-          if (this.isFiringMode) {
-            this.fireShot(pointer.worldX, pointer.worldY);
-          }
-        },
-        this,
-      );
+      this.input.on('pointerdown', this.startShooting, this);
+      this.input.on('pointerup', this.stopShooting, this);
+    }
+
+    startShooting(pointer) {
+      if (!this.isFiringMode || this.isShooting) {
+        return;
+      }
+
+      this.crosshair.setPosition(pointer.worldX, pointer.worldY);
+
+      if (!this.isShooting) {
+        this.isShooting = true;
+        this.fireShot(pointer.worldX, pointer.worldY); // Shoot immediately
+
+        // Set up a repeating timer for subsequent shots
+        this.shootingTimer = this.time.addEvent({
+          delay: this.shotInterval,
+          callback: () => this.fireShot(pointer.worldX, pointer.worldY),
+          callbackScope: this,
+          loop: true,
+        });
+      }
+    }
+
+    stopShooting() {
+      this.isShooting = false;
+
+      if (this.shootingTimer) {
+        this.shootingTimer.remove(false);
+        this.shootingTimer = null;
+      }
     }
 
     fireShot(targetX, targetY) {
-      let shot = this.shots.get(this.player.x, this.player.y);
+      let shot = this.shots.get(this.base.$.x, this.base.$.y);
 
       if (!shot) {
         return;
@@ -121,7 +129,7 @@ window.onload = () => {
 
       shot.setActive(true);
       shot.setVisible(true);
-      shot.setRotation(Phaser.Math.Angle.Between(this.player.x, this.player.y, targetX, targetY));
+      shot.setRotation(Phaser.Math.Angle.Between(this.base.$.x, this.base.$.y, targetX, targetY));
 
       this.physics.moveTo(shot, targetX, targetY, 500);
 
@@ -137,45 +145,62 @@ window.onload = () => {
     }
 
     toggleCrosshair() {
-      this.crosshair.setDepth(this.isFiringMode ? 1 : 0);
+      this.crosshair.setVisible(this.isFiringMode);
     }
 
     createCrosshair() {
       this.crosshair = this.add.sprite(0, 0, 'crosshair');
       this.crosshair.setDepth(0);
 
-      this.input.on(
-        'pointermove',
-        (pointer) => {
-          console.log('pointer', pointer);
+      this.input.on('pointermove', (pointer) => {
+        if (this.isFiringMode) {
+          this.crosshair.setPosition(pointer.worldX, pointer.worldY);
+        }
+      });
+    }
 
-          if (this.isFiringMode) {
-            this.crosshair.setPosition(pointer.worldX, pointer.worldY);
-          }
-        },
-      );
+    playerTouchedBase() {
+      this.baseResources.stone += this.player.resources.stone;
+      this.baseResources.iron += this.player.resources.iron;
+
+      this.player.momentum = {
+        x: 0,
+        y: 0,
+      };
+      this.player.resources = {
+        stone: 0,
+        iron: 0,
+      };
     }
 
     setPhysics() {
       this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
-      this.physics.add.collider(this.player, this.blocks, this.handleBlockCollision.bind(this));
-      this.physics.add.collider(this.player, this.staticBlocks);
+
+      this.physics.add.collider(this.player.$, this.blocks, this.handleBlockCollision.bind(this));
+      this.physics.add.collider(this.player.$, this.staticBlocks);
+      this.physics.add.collider(this.player.$, this.enemies);
+      this.physics.add.overlap(this.player.$, this.base.$, this.playerTouchedBase.bind(this));
+
+      this.physics.add.collider(this.enemies, this.base.$, this.handleBaseEnemieCollision.bind(this));
+      this.physics.add.collider(this.enemies, this.staticBlocks);
+
+      this.physics.add.collider(this.shots, this.staticBlocks, (shot) => {
+        shot.destroy();
+      });
+      this.physics.add.collider(this.shots, this.blocks);
       this.physics.add.collider(this.shots, this.enemies, (shot, enemy) => {
-        shot.setActive(false);
-        shot.setVisible(false);
+        enemy.takeDamage(50);
+
+        shot.destroy();
       });
     }
 
-    createPlayer() {
-      this.player = this.physics.add
-        .image(worldWidth / 2, 0, 'player')
-        .setScale(0.8)
-        .refreshBody();
+    handleBaseEnemieCollision(enemie, base) {
+      base.takeDamage(enemie.damage);
+    }
 
-      this.player.setBounce(0, 0.1);
-      this.player.setCollideWorldBounds(true);
-      this.player.x = 755;
-      this.player.y = 700;
+    createPlayer() {
+      this.player = new Player(this, worldWidth / 2, groundLevel, 'player');
     }
 
     createCameras() {
@@ -183,75 +208,19 @@ window.onload = () => {
       this.cameras.main.setLerp(0.1, 0.1);
       this.cameras.main.setZoom(2);
       this.cameras.main.centerOn(0, 0);
-      this.cameras.main.startFollow(this.player);
+      this.cameras.main.startFollow(this.player.$);
     }
 
     createCursors() {
-      if (this.sys.game.device.os.android || this.sys.game.device.os.iOS) {
-        return;
-      }
+      // if (this.sys.game.device.os.android || this.sys.game.device.os.iOS) {
+      //   return;
+      // }
 
       this.cursors = this.input.keyboard.createCursorKeys();
     }
 
-    createJoystick() {
-      if (!this.sys.game.device.os.android || !this.sys.game.device.os.iOS) {
-        return;
-      }
-
-      this.joystickBase = this.add
-        .circle(this.player.x, this.player.y + 100, 50, 0x888888)
-        .setAlpha(0.5)
-        .setInteractive();
-      this.joystickThumb = this.add
-        .circle(this.player.x, this.player.y + 100, 25, 0xcccccc)
-        .setAlpha(0.5)
-        .setInteractive();
-
-      this.input.setDraggable(this.joystickThumb);
-
-      this.input.on(
-        'drag',
-        (pointer, gameObject, dragX, dragY) => {
-          let distance = Phaser.Math.Distance.Between(this.joystickBase.x, this.joystickBase.y, dragX, dragY);
-          let angle = Phaser.Math.Angle.Between(this.joystickBase.x, this.joystickBase.y, dragX, dragY);
-
-          if (distance > this.joystickBase.radius) {
-            distance = this.joystickBase.radius;
-          }
-
-          this.joystickThumb.x = this.joystickBase.x + distance * Math.cos(angle);
-          this.joystickThumb.y = this.joystickBase.y + distance * Math.sin(angle);
-          if (angle <= -1.2) {
-            this.playerMoving = { up: true };
-          } else if (angle <= -2.5 || angle >= 2.5) {
-            this.playerMoving = { left: true };
-          } else if (angle >= -0.05 && angle <= 1) {
-            this.playerMoving = { right: true };
-          } else if (angle >= 1.2 && angle <= 1.7) {
-            this.playerMoving = { down: true };
-          } else {
-            this.playerMoving = {};
-          }
-          this.joystickBase.x = this.player.x;
-          this.joystickBase.y = this.player.y + 100;
-        },
-        this,
-      );
-
-      this.input.on(
-        'dragend',
-        () => {
-          console.log('dragend');
-          this.joystickThumb.x = this.joystickBase.x;
-          this.joystickThumb.y = this.joystickBase.y;
-        },
-        this,
-      );
-    }
-
-    isPlayerNearHouse() {
-      return Phaser.Math.Distance.Between(this.player.x, this.player.y, this.house.x, this.house.y) < playerSize;
+    isPlayerNearBase() {
+      return Phaser.Math.Distance.Between(this.player.$.x, this.player.$.y, this.base.$.x, this.base.$.y) < playerSize;
     }
 
     update() {
@@ -271,65 +240,122 @@ window.onload = () => {
       if (this.cursors.left.isDown) {
         this.player.flipX = false;
         this.player.setVelocityX(-this.calculatePlayerSpeed());
-        this.playerMomentum.x = -this.calculatePlayerSpeed();
+        this.player.momentum.x = -this.calculatePlayerSpeed();
       } else if (this.cursors.right.isDown) {
         this.player.flipX = true;
         this.player.setVelocityX(this.calculatePlayerSpeed());
-        this.playerMomentum.x = this.calculatePlayerSpeed();
+        this.player.momentum.x = this.calculatePlayerSpeed();
       } else {
-        this.player.setVelocityX(this.playerMomentum.x);
-        this.playerMomentum.x *= playerMomentumDecay;
+        this.player.setVelocityX(this.player.momentum.x);
+        this.player.momentum.x *= this.player.momentumDecay;
       }
 
       if (this.cursors.up.isDown) {
         this.player.setVelocityY(-this.calculatePlayerSpeed());
-        this.playerMomentum.y = -this.calculatePlayerSpeed();
+        this.player.momentum.y = -this.calculatePlayerSpeed();
       } else if (this.cursors.down.isDown) {
         this.player.setVelocityY(this.calculatePlayerSpeed());
-        this.playerMomentum.y = this.calculatePlayerSpeed();
+        this.player.momentum.y = this.calculatePlayerSpeed();
       } else {
-        this.player.setVelocityY(this.playerMomentum.y);
-        this.playerMomentum.y *= playerMomentumDecay;
+        this.player.setVelocityY(this.player.momentum.y);
+        this.player.momentum.y *= this.player.momentumDecay;
       }
+    }
+
+    createJoystick() {
+      if (!this.sys.game.device.os.android || !this.sys.game.device.os.iOS) {
+        return;
+      }
+
+      this.joystickBase = this.add
+        .circle(this.player.x, this.player.y + 100, 35, 0x888888)
+        .setAlpha(0.5)
+        .setInteractive();
+      this.joystickThumb = this.add
+        .circle(this.player.x, this.player.y + 100, 20, 0xcccccc)
+        .setAlpha(0.5)
+        .setInteractive();
+
+      this.input.setDraggable(this.joystickThumb);
+
+      this.input.on(
+        'drag',
+        (pointer, gameObject, dragX, dragY) => {
+          let distance = Phaser.Math.Distance.Between(this.joystickBase.x, this.joystickBase.y, dragX, dragY);
+          let angle = Phaser.Math.Angle.Between(this.joystickBase.x, this.joystickBase.y, dragX, dragY);
+
+          if (distance > this.joystickBase.radius) {
+            distance = this.joystickBase.radius;
+          }
+
+          this.joystickBase.x = this.player.$.x;
+          this.joystickBase.y = this.player.$.y + 100;
+
+          this.joystickThumb.x = this.joystickBase.x + distance * Math.cos(angle);
+          this.joystickThumb.y = this.joystickBase.y + distance * Math.sin(angle);
+          
+          if (angle <= -1.2) {
+            this.player.moving = { up: true };
+          } else if (angle <= -2.5 || angle >= 2.5) {
+            this.player.moving = { left: true };
+          } else if (angle >= -0.05 && angle <= 1) {
+            this.player.moving = { right: true };
+          } else if (angle >= 1.2 && angle <= 1.7) {
+            this.player.moving = { down: true };
+          } else {
+            this.player.moving = {};
+          }
+        },
+        this,
+      );
+
+      this.input.on(
+        'dragend',
+        () => {
+          this.joystickThumb.x = this.joystickBase.x;
+          this.joystickThumb.y = this.joystickBase.y;
+        },
+        this,
+      );
     }
 
     updatePlayerJoystick() {
       if (!this.joystickThumb) {
         return;
       }
-      
+
       if (this.joystickThumb && this.isFiringMode) {
         return this.player.setVelocity(0);
       }
-      
+
       let dx = this.joystickThumb.x - this.joystickBase.x;
       let dy = this.joystickThumb.y - this.joystickBase.y;
 
       // Normalize the vector
-      let magnitude = Math.sqrt(dx * dx + dy * dy);
+      const magnitude = Math.sqrt(dx * dx + dy * dy);
       if (magnitude > 0) {
         dx /= magnitude;
         dy /= magnitude;
       }
 
-      // Use dx and dy to control the player
-      // For example:
-      this.player.setVelocity(dx * playerSpeed, dy * playerSpeed);
+      this.player.setVelocity(dx * this.calculatePlayerSpeed(), dy * this.calculatePlayerSpeed());
+
+      this.joystickBase.x = this.player.$.x;
+      this.joystickBase.y = this.player.$.y + 100;
     }
 
     calculatePlayerSpeed() {
-      return playerSpeed - Object.values(this.playerResources).reduce((acc, num) => (acc += num), 0) * 2;
+      return this.player.speed - Object.values(this.player.resources).reduce((acc, num) => (acc += num), 0) * 2;
     }
 
     createAllBlocks() {
       this.blocks = this.physics.add.staticGroup();
-      this.resourceBlocks = this.physics.add.staticGroup();
       const center = Math.floor(worldWidth / 2 / blockSize);
       const ironChunks = {};
 
-      for (let x = 0; x < worldWidth / blockSize; x++) {
-        for (let y = 0; y < (worldHeight - 800) / blockSize; y++) {
-          if (y === 0 || (y === 1 && (x + 1 === center || x === center || x - 1 === center || x - 2 === center))) {
+      for (let x = 0; x < worldWidth / blockSize + 1; x++) {
+        for (let y = 0; y < (worldHeight - groundLevel - blockSize) / blockSize; y++) {
+          if (y === 0 || (y === 1 && (x === center || x - 1 === center))) {
             continue;
           }
 
@@ -361,13 +387,14 @@ window.onload = () => {
             const newBlock = new DestructibleBlock(
               this,
               x * blockSize,
-              y * blockSize + 768,
+              y * blockSize + groundLevel,
               'dark',
               blocksLife,
               amountRandom,
               'iron',
             );
             this.blocks.add(newBlock);
+
             continue;
           }
 
@@ -375,25 +402,28 @@ window.onload = () => {
             const newBlock = new DestructibleBlock(
               this,
               x * blockSize,
-              y * blockSize + 768,
+              y * blockSize + groundLevel,
               'stone',
               blocksLife,
               amountRandom,
               'stone',
             );
             this.blocks.add(newBlock);
+            newBlock.setOverlay('down');
+
             continue;
           }
 
           const newBlock = new DestructibleBlock(
             this,
             x * blockSize,
-            y * blockSize + 768,
+            y * blockSize + groundLevel,
             'dark',
             blocksLife,
             amountRandom,
             'stone',
           );
+
           this.blocks.add(newBlock);
         }
       }
@@ -403,12 +433,13 @@ window.onload = () => {
       this.staticBlocks = this.physics.add.staticGroup();
 
       const center = Math.floor(worldWidth / 2 / blockSize);
-      for (let x = 0; x < worldWidth / blockSize; x += 1) {
+      for (let x = 0; x < worldWidth / blockSize + 1; x += 1) {
         if (x === center || (x >= center && x <= center + 1)) {
           continue;
         }
 
-        this.staticBlocks.create(x * blockSize, 768, 'ground');
+        const block = this.staticBlocks.create(x * blockSize, groundLevel, 'ground');
+        block.body.setSize(blockSize, blockSize);
       }
 
       this.staticBlocks.create(worldWidth / 2 - blockSize - 14, 800, 'ground');
@@ -416,38 +447,46 @@ window.onload = () => {
     }
 
     createBackground() {
-      this.add.image(750, 300, 'sky');
-      this.add.image(1000, 2000, 'cave');
+      this.add.image(750, 185, 'sky');
+      this.add.image(750, 1634, 'cave');
     }
 
-    createHouse() {
-      this.house = this.add.image(worldWidth / 2, 645, 'house').setInteractive();
-      this.house.on('pointerdown', () => {
-        // if (!this.isPlayerNearHouse()) {
-        //   return;
-        // }
+    createBase() {
+      this.base = new Base(this, worldWidth / 2, groundLevel - 113, 'base', 100);
+
+      this.base.$.on('pointerdown', () => {
+        if (!this.isPlayerNearBase() && !this.isFiringMode) {
+          return;
+        }
 
         this.isFiringMode = !this.isFiringMode;
 
-        this.baseResources.stone += this.playerResources.stone;
-        this.baseResources.iron += this.playerResources.iron;
+        console.log('setGravity', this.player.$.setGravity);
+        if (this.isFiringMode) {
+          this.player.$.body.setAllowGravity(false);
+          this.cameras.main.stopFollow(this.player.$);
+          this.cameras.main.centerOn(worldWidth / 2, groundLevel - 325);
+        } else {
+          this.player.$.body.setAllowGravity(true);
+          this.cameras.main.startFollow(this.player.$);
+        }
 
-        this.playerMomentum = {
-          x: 0,
-          y: 0,
-        };
-        this.playerResources = {
-          stone: 0,
-          iron: 0,
-        };
+        this.cameras.main.setZoom(this.isFiringMode ? 1 : 2);
+        this.player.$.setVisible(!this.isFiringMode);
+
+        this.player.$.x = worldWidth / 2;
+        this.player.$.y = groundLevel - playerSize * 2.3;
+
         this.toggleCrosshair();
       });
     }
 
     setWaveInterval() {
-      // setInterval(() => {
+      this.createEnemiesWave();
+
+      setInterval(() => {
         this.createEnemiesWave();
-      // }, 1000);
+      }, 60000);
     }
 
     handleBlockCollision(player, block) {
@@ -466,33 +505,33 @@ window.onload = () => {
 
     handleCursorsCollision(player, block) {
       if (this.cursors.left.isDown && block.x <= player.x && block.y <= player.y + blockSize) {
-        this.handleDestroyedBlock(block);
+        this.damageBlock(block);
       } else if (this.cursors.right.isDown && block.x >= player.x && block.y <= player.y + blockSize) {
-        this.handleDestroyedBlock(block);
+        this.damageBlock(block);
       } else if (this.cursors.down.isDown && block.y >= player.y && block.x - player.x <= blockSize) {
-        this.handleDestroyedBlock(block);
+        this.damageBlock(block);
       } else if (this.cursors.up.isDown && block.y <= player.y && player.x - block.x <= blockSize) {
-        this.handleDestroyedBlock(block);
+        this.damageBlock(block);
       }
     }
 
     handleJoystickCollision(player, block) {
-      if (this.playerMoving.left && block.x <= player.x && block.y <= player.y + blockSize) {
-        this.handleDestroyedBlock(block);
-      } else if (this.playerMoving.right && block.x >= player.x && block.y <= player.y + blockSize) {
-        this.handleDestroyedBlock(block);
-      } else if (this.playerMoving.down && block.y >= player.y && block.x - player.x <= blockSize) {
-        this.handleDestroyedBlock(block);
-      } else if (this.playerMoving.up && block.y <= player.y && player.x - block.x <= blockSize) {
-        this.handleDestroyedBlock(block);
+      if (this.player.moving.left && block.x <= player.x && block.y <= player.y + blockSize) {
+        this.damageBlock(block);
+      } else if (this.player.moving.right && block.x >= player.x && block.y <= player.y + blockSize) {
+        this.damageBlock(block);
+      } else if (this.player.moving.down && block.y >= player.y && block.x - player.x <= blockSize) {
+        this.damageBlock(block);
+      } else if (this.player.moving.up && block.y <= player.y && player.x - block.x <= blockSize) {
+        this.damageBlock(block);
       }
     }
 
-    handleDestroyedBlock(block) {
-      const isDestroyed = block.damage(playerDamage);
+    damageBlock(block) {
+      const isDestroyed = block.damage(this.player.damage);
 
       if (isDestroyed) {
-        this.playerResources[block.type] += block.amount;
+        this.player.resources[block.type] += block.amount;
         this.checkAllBlocks(block);
       }
     }
@@ -503,71 +542,249 @@ window.onload = () => {
         const right = block.x !== b.x && block.x + blockSize === b.x && block.y === b.y;
         const up = block.y !== b.y && block.y - blockSize === b.y && block.x === b.x;
         const down = block.y !== b.y && block.y + blockSize === b.y && block.x === b.x;
+        const upLeft = block.x !== b.x && block.x - blockSize === b.x && block.y - blockSize === b.y;
+        const downLeft = block.x !== b.x && block.x - blockSize === b.x && block.y + blockSize === b.y;
+        const upRight = block.x !== b.x && block.x + blockSize === b.x && block.y - blockSize === b.y;
+        const downRight = block.x !== b.x && block.x + blockSize === b.x && block.y + blockSize === b.y;
 
-        console.log(b.texture);
         if (left || right || up || down) {
-          if (left && right && up && down) {
-            b.updateTexture(b.type);
-          }
+          b.updateTexture(b.type);
 
           if (up) {
-            b.updateTexture(`${b.type}-up`);
-            return;
+            return b.setOverlay(`up`);
           }
 
           if (down) {
-            b.updateTexture(`${b.type}-down`);
-            return;
+            return b.setOverlay(`down`);
           }
 
           if (left) {
-            b.updateTexture(`${b.type}-left`);
-            return;
+            return b.setOverlay(`left`);
           }
 
           if (right) {
-            b.updateTexture(`${b.type}-right`);
-            return;
+            return b.setOverlay(`right`);
           }
+        }
 
-          b.updateTexture(b.type || 'stone');
+        if (
+          b.texture.key === 'dark' &&
+          !left &&
+          !right &&
+          !up &&
+          !down &&
+          (downLeft || downRight || upRight || upLeft)
+        ) {
+          b.updateTexture(b.type);
+
+          if (downLeft) {
+            return b.setAngleOverlay(`down-left`);
+          }
+          if (downRight) {
+            return b.setAngleOverlay(`down-right`);
+          }
+          if (upRight) {
+            return b.setAngleOverlay(`up-right`);
+          }
+          if (upLeft) {
+            return b.setAngleOverlay(`up-left`);
+          }
         }
       });
     }
   }
-
-  const config = {
-    type: Phaser.AUTO,
-    width: '100%',
-    height: '100%',
-    scene: Main,
-    physics: {
-      default: 'arcade',
-      arcade: {
-        gravity: { x: 10, y: 0 },
-      },
-    },
-    input: {
-      activePointers: 2,
-    },
-  };
-
-  const game = new Phaser.Game(config);
 
   class DestructibleBlock extends Phaser.GameObjects.Sprite {
     constructor(scene, x, y, texture, health, amount, type = null) {
       super(scene, x, y, texture);
 
       this.scene = scene;
-      this.scene.add.existing(this);
+      this.x = x;
+      this.y = y;
+      this.block = this.scene.add.existing(this);
       this.scene.physics.add.existing(this, true);
 
       this.amount = amount;
       this.type = type;
       this.health = health;
+      this.fullHealth = health;
     }
 
     damage(amount) {
+      this.health -= amount;
+
+      if (!this.cracks) {
+        this.cracks = this.scene.add.sprite(this.x, this.y, 'cracks').setAlpha(0);
+      }
+
+      this.cracks.setAlpha(1 - this.health / this.fullHealth);
+
+      if (this.health <= 0) {
+        this.destroy();
+        this.cracks.destroy();
+        this.overlay && this.overlay.destroy();
+        this.angleOverlay && this.angleOverlay.destroy();
+
+        return true;
+      }
+
+      return false;
+    }
+
+    updateTexture(newTexture) {
+      this.setTexture(newTexture);
+    }
+
+    setOverlay(position) {
+      if (!this.overlay) {
+        this.overlay = this.scene.add.sprite(this.x, this.y, 'overlay');
+      }
+      if (this.angleOverlay) {
+        this.angleOverlay.destroy();
+      }
+
+      if (position === 'up') {
+        this.overlay.flipY = false;
+      }
+      if (position === 'down') {
+        this.overlay.flipY = true;
+      }
+      if (position === 'left') {
+        this.overlay.setAngle(270);
+      }
+      if (position === 'right') {
+        this.overlay.setAngle(90);
+      }
+    }
+
+    setAngleOverlay(position) {
+      if (!this.angleOverlay) {
+        this.angleOverlay = this.scene.add.sprite(this.x, this.y, 'overlay-angle');
+      }
+      if (this.overlay) {
+        this.overlay.destroy();
+      }
+
+      if (position === 'down-left') {
+        this.angleOverlay.setAngle(0);
+      }
+      if (position === 'down-right') {
+        this.angleOverlay.setAngle(270);
+      }
+      if (position === 'up-right') {
+        this.angleOverlay.setAngle(180);
+      }
+      if (position === 'up-left') {
+        this.angleOverlay.setAngle(90);
+      }
+    }
+  }
+
+  class Base extends Phaser.GameObjects.Sprite {
+    constructor(scene, x, y, texture, health) {
+      super(scene, x, y, texture);
+
+      this.scene = scene;
+      this.$ = scene.physics.add.staticImage(x, y, texture);
+      this.$.setInteractive();
+
+      this.health = health;
+      this.fullHealth = health;
+    }
+
+    takeDamage(amount) {
+      this.health -= amount;
+
+      if (this.health <= 0) {
+        this.destroy();
+
+        return true;
+      }
+
+      return false;
+    }
+  }
+
+  class OrcEnemie extends Phaser.GameObjects.Sprite {
+    constructor(scene, x, y, texture, health, type = null) {
+      super(scene, x, y, texture);
+
+      this.scene = scene;
+
+      this.type = type;
+      this.damage = 1;
+      this.health = health;
+      this.fullHealth = health;
+    }
+
+    takeDamage(amount) {
+      this.health -= amount;
+
+      if (this.health <= 0) {
+        this.destroy();
+
+        return true;
+      }
+
+      return false;
+    }
+  }
+
+  class Player extends Phaser.GameObjects.Sprite {
+    damage = 1;
+    speed = 150;
+    momentumDecay = 0.94;
+    momentum = {
+      x: 0,
+      y: 0,
+    };
+    resources = {
+      stone: 0,
+      iron: 0,
+    };
+    moving = {
+      up: false,
+      left: false,
+      right: false,
+      down: false,
+    };
+
+    constructor(scene, x, y, texture, health) {
+      super(scene, x, y, texture);
+
+      this.scene = scene;
+      this.$ = scene.physics.add
+        .image(worldWidth / 2, 0, 'player')
+        .setScale(0.8)
+        .refreshBody();
+
+      this.$.setBounce(0.1, 0.8);
+      this.$.setCollideWorldBounds(true);
+      this.$.x = x;
+      this.$.y = y;
+
+      this.health = health;
+      this.fullHealth = health;
+    }
+
+    set flipX(flipX) {
+      return (this.$.flipX = flipX);
+    }
+
+    setVelocityX(velocity) {
+      this.$.setVelocityX(velocity);
+    }
+    setVelocityY(velocity) {
+      this.$.setVelocityY(velocity);
+    }
+    setVelocity(velocity) {
+      this.$.setVelocity(velocity);
+    }
+    setGravity(x, y) {
+      this.$.setGravity(x, y);
+    }
+
+    static takeDamage(amount) {
       this.health -= amount;
 
       if (this.health <= 0) {
@@ -579,8 +796,27 @@ window.onload = () => {
       return false;
     }
 
-    updateTexture(newTexture) {
+    static updateTexture(newTexture) {
       this.setTexture(newTexture);
     }
   }
+
+  new Phaser.Game({
+    type: Phaser.AUTO,
+    width: '100%',
+    height: '100%',
+    scene: Main,
+    physics: {
+      default: 'arcade',
+      arcade: {
+        gravity: { x: 0, y: 300 },
+      },
+    },
+    fps: {
+      limit: 70,
+    },
+    input: {
+      activePointers: 2,
+    },
+  });
 };
