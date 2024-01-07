@@ -51,6 +51,7 @@ window.onload = () => {
     create() {
       this.createBackground();
       this.createBase();
+      this.createAnimations();
       this.createPlayer();
 
       this.createStaticBlocks();
@@ -66,7 +67,24 @@ window.onload = () => {
 
       this.setPhysics();
       this.setWaveInterval();
+      this.listenToEvents();
       this.physics.world.createDebugGraphic();
+    }
+
+    createAnimations() {
+      this.anims.create({
+        key: 'walk',
+        frames: this.anims.generateFrameNumbers('player', { frames: [0, 1, 2, 3] }),
+        frameRate: 8,
+        repeat: -1,
+      });
+
+      this.anims.create({
+        key: 'idle',
+        frames: this.anims.generateFrameNumbers('player', { frames: [5, 6, 7, 8] }),
+        frameRate: 8,
+        repeat: -1,
+      });
     }
 
     createEnemies() {
@@ -74,9 +92,8 @@ window.onload = () => {
     }
 
     createEnemiesWave() {
-      const enemie = this.enemies.get(0, groundLevel - playerSize, 'orc', 100);
+      const enemie = this.enemies.get(playerSize * 3, groundLevel - playerSize, 'orc', 100);
 
-      enemie.body.setImmovable(true);
       this.physics.moveTo(enemie, this.base.$.x, groundLevel - playerSize, 100);
     }
 
@@ -85,9 +102,41 @@ window.onload = () => {
         classType: Phaser.Physics.Arcade.Image,
         defaultKey: 'arrow',
       });
+    }
 
-      this.input.on('pointerdown', this.startShooting, this);
-      this.input.on('pointerup', this.stopShooting, this);
+    listenToEvents() {
+      this.input.on(
+        'pointerdown',
+        (pointer) => {
+          this.pointerdownCoords = { x: pointer.x, y: pointer.x };
+
+          this.startShooting(pointer);
+        },
+        this,
+      );
+
+      this.input.on(
+        'pointermove',
+        (pointer) => {
+          if (this.isFiringMode) {
+            this.crosshair.setPosition(pointer.worldX, pointer.worldY);
+          }
+          this.dragJoystick(pointer);
+        },
+        this,
+      );
+
+      this.input.on(
+        'pointerup',
+        (pointer) => {
+          this.stopShooting();
+
+          this.pointerdownCoords = null;
+          this.joystickThumb.x = this.joystickBase.x;
+          this.joystickThumb.y = this.joystickBase.y;
+        },
+        this,
+      );
     }
 
     startShooting(pointer) {
@@ -150,13 +199,7 @@ window.onload = () => {
 
     createCrosshair() {
       this.crosshair = this.add.sprite(0, 0, 'crosshair');
-      this.crosshair.setDepth(0);
-
-      this.input.on('pointermove', (pointer) => {
-        if (this.isFiringMode) {
-          this.crosshair.setPosition(pointer.worldX, pointer.worldY);
-        }
-      });
+      this.toggleCrosshair();
     }
 
     playerTouchedBase() {
@@ -212,11 +255,11 @@ window.onload = () => {
     }
 
     createCursors() {
-      // if (this.sys.game.device.os.android || this.sys.game.device.os.iOS) {
-      //   return;
-      // }
+      if (!this.sys.game.device.os.android && !this.sys.game.device.os.iOS) {
+        return;
+      }
 
-      this.cursors = this.input.keyboard.createCursorKeys();
+      // this.cursors = this.input.keyboard.createCursorKeys();
     }
 
     isPlayerNearBase() {
@@ -234,86 +277,86 @@ window.onload = () => {
       }
 
       if (this.cursors && this.isFiringMode) {
-        return this.player.setVelocity(0);
+        return this.player.$.setVelocity(0);
       }
 
       if (this.cursors.left.isDown) {
-        this.player.flipX = false;
-        this.player.setVelocityX(-this.calculatePlayerSpeed());
+        this.player.$.setFlipX(false);
+        this.player.$.setVelocityX(-this.calculatePlayerSpeed());
         this.player.momentum.x = -this.calculatePlayerSpeed();
       } else if (this.cursors.right.isDown) {
-        this.player.flipX = true;
-        this.player.setVelocityX(this.calculatePlayerSpeed());
+        this.player.$.setFlipX(true);
+        this.player.$.setVelocityX(this.calculatePlayerSpeed());
         this.player.momentum.x = this.calculatePlayerSpeed();
       } else {
-        this.player.setVelocityX(this.player.momentum.x);
+        this.player.$.setVelocityX(this.player.momentum.x);
         this.player.momentum.x *= this.player.momentumDecay;
       }
 
       if (this.cursors.up.isDown) {
-        this.player.setVelocityY(-this.calculatePlayerSpeed());
+        this.player.$.setVelocityY(-this.calculatePlayerSpeed());
         this.player.momentum.y = -this.calculatePlayerSpeed();
       } else if (this.cursors.down.isDown) {
-        this.player.setVelocityY(this.calculatePlayerSpeed());
+        this.player.$.setVelocityY(this.calculatePlayerSpeed());
         this.player.momentum.y = this.calculatePlayerSpeed();
       } else {
-        this.player.setVelocityY(this.player.momentum.y);
+        this.player.$.setVelocityY(this.player.momentum.y);
         this.player.momentum.y *= this.player.momentumDecay;
       }
     }
 
-    createJoystick() {
-      if (!this.sys.game.device.os.android || !this.sys.game.device.os.iOS) {
-        return;
+    dragJoystick(pointer) {
+      this.distance = Phaser.Math.Distance.Between(
+        this.joystickBase.x,
+        this.joystickBase.y,
+        pointer.worldX,
+        pointer.worldY,
+      );
+      this.angle = Phaser.Math.Angle.Between(this.joystickBase.x, this.joystickBase.y, pointer.worldX, pointer.worldY);
+
+      if (this.distance > this.joystickBase.radius) {
+        this.distance = this.joystickBase.radius;
       }
 
-      this.joystickBase = this.add
-        .circle(this.player.x, this.player.y + 100, 35, 0x888888)
-        .setAlpha(0.5)
-        .setInteractive();
-      this.joystickThumb = this.add
-        .circle(this.player.x, this.player.y + 100, 20, 0xcccccc)
-        .setAlpha(0.5)
-        .setInteractive();
+      if (this.angle <= -1.2) {
+        this.player.moving = { up: true };
+      } else if (this.angle <= -2.5 || this.angle >= 2.5) {
+        this.player.moving = { left: true };
+        this.player.$.setFlipX(false);
+      } else if (this.angle >= -0.05 && this.angle <= 1) {
+        this.player.moving = { right: true };
+        this.player.$.setFlipX(true);
+      } else if (this.angle >= 1.2 && this.angle <= 1.7) {
+        this.player.moving = { down: true };
+      } else {
+        this.player.moving = {};
+      }
+
+      this.joystickBase.x = this.cameras.main.worldView.x + this.cameras.main.worldView.width * 0.8;
+      this.joystickBase.y = this.cameras.main.worldView.y + this.cameras.main.worldView.height * 0.8;
+      this.joystickThumb.x = this.joystickBase.x + this.distance * Math.cos(this.angle);
+      this.joystickThumb.y = this.joystickBase.y + this.distance * Math.sin(this.angle);
+    }
+
+    createJoystick() {
+      // if (!this.sys.game.device.os.android || !this.sys.game.device.os.iOS) {
+      //   return;
+      // }
+      const x = this.cameras.main.worldView.x + this.cameras.main.worldView.width * 0.9;
+      const y = this.cameras.main.worldView.y + this.cameras.main.worldView.height * 0.9;
+
+      this.joystickBase = this.add.circle(x, y, 35, 0x888888).setAlpha(0.5).setInteractive();
+      this.joystickThumb = this.add.circle(x, y, 15, 0xcccccc).setAlpha(0.5).setInteractive();
 
       this.input.setDraggable(this.joystickThumb);
 
-      this.input.on(
-        'drag',
-        (pointer, gameObject, dragX, dragY) => {
-          let distance = Phaser.Math.Distance.Between(this.joystickBase.x, this.joystickBase.y, dragX, dragY);
-          let angle = Phaser.Math.Angle.Between(this.joystickBase.x, this.joystickBase.y, dragX, dragY);
-
-          if (distance > this.joystickBase.radius) {
-            distance = this.joystickBase.radius;
-          }
-
-          this.joystickBase.x = this.player.$.x;
-          this.joystickBase.y = this.player.$.y + 100;
-
-          this.joystickThumb.x = this.joystickBase.x + distance * Math.cos(angle);
-          this.joystickThumb.y = this.joystickBase.y + distance * Math.sin(angle);
-          
-          if (angle <= -1.2) {
-            this.player.moving = { up: true };
-          } else if (angle <= -2.5 || angle >= 2.5) {
-            this.player.moving = { left: true };
-          } else if (angle >= -0.05 && angle <= 1) {
-            this.player.moving = { right: true };
-          } else if (angle >= 1.2 && angle <= 1.7) {
-            this.player.moving = { down: true };
-          } else {
-            this.player.moving = {};
-          }
-        },
-        this,
-      );
+      this.input.on('drag', (pointer) => {}, this);
 
       this.input.on(
         'dragend',
         () => {
-          this.joystickThumb.x = this.joystickBase.x;
-          this.joystickThumb.y = this.joystickBase.y;
+          // this.joystickThumb.x = this.joystickBase.x;
+          // this.joystickThumb.y = this.joystickBase.y;
         },
         this,
       );
@@ -325,7 +368,7 @@ window.onload = () => {
       }
 
       if (this.joystickThumb && this.isFiringMode) {
-        return this.player.setVelocity(0);
+        return this.player.$.setVelocity(0);
       }
 
       let dx = this.joystickThumb.x - this.joystickBase.x;
@@ -338,10 +381,16 @@ window.onload = () => {
         dy /= magnitude;
       }
 
-      this.player.setVelocity(dx * this.calculatePlayerSpeed(), dy * this.calculatePlayerSpeed());
+      this.player.$.setVelocity(dx * this.calculatePlayerSpeed(), dy * this.calculatePlayerSpeed());
 
-      this.joystickBase.x = this.player.$.x;
-      this.joystickBase.y = this.player.$.y + 100;
+      if (!this.pointerdownCoords) {
+        return;
+      }
+
+      this.joystickBase.x = this.cameras.main.worldView.x + this.cameras.main.worldView.width * 0.8;
+      this.joystickBase.y = this.cameras.main.worldView.y + this.cameras.main.worldView.height * 0.8;
+      this.joystickThumb.x = this.joystickBase.x + this.distance * Math.cos(this.angle);
+      this.joystickThumb.y = this.joystickBase.y + this.distance * Math.sin(this.angle);
     }
 
     calculatePlayerSpeed() {
@@ -461,24 +510,28 @@ window.onload = () => {
 
         this.isFiringMode = !this.isFiringMode;
 
-        console.log('setGravity', this.player.$.setGravity);
         if (this.isFiringMode) {
-          this.player.$.body.setAllowGravity(false);
           this.cameras.main.stopFollow(this.player.$);
           this.cameras.main.centerOn(worldWidth / 2, groundLevel - 325);
         } else {
-          this.player.$.body.setAllowGravity(true);
           this.cameras.main.startFollow(this.player.$);
         }
 
-        this.cameras.main.setZoom(this.isFiringMode ? 1 : 2);
+        this.player.$.body.setAllowGravity(!this.isFiringMode);
         this.player.$.setVisible(!this.isFiringMode);
+        this.cameras.main.setZoom(this.isFiringMode ? 1 : 2);
 
         this.player.$.x = worldWidth / 2;
         this.player.$.y = groundLevel - playerSize * 2.3;
 
         this.toggleCrosshair();
+        this.toggleJoystick(!this.isFiringMode);
       });
+    }
+
+    toggleJoystick(isShow) {
+      this.joystickBase.setVisible(isShow);
+      this.joystickThumb.setVisible(isShow);
     }
 
     setWaveInterval() {
@@ -532,6 +585,7 @@ window.onload = () => {
 
       if (isDestroyed) {
         this.player.resources[block.type] += block.amount;
+        this.player.addExperience(10);
         this.checkAllBlocks(block);
       }
     }
@@ -754,7 +808,7 @@ window.onload = () => {
 
       this.scene = scene;
       this.$ = scene.physics.add
-        .image(worldWidth / 2, 0, 'player')
+        .image(worldWidth / 2, 0, 'player', '__BASE')
         .setScale(0.8)
         .refreshBody();
 
@@ -765,26 +819,30 @@ window.onload = () => {
 
       this.health = health;
       this.fullHealth = health;
+
+      this.experience = 0;
+      this.level = 1;
+      this.nextLevelXP = 100;
     }
 
-    set flipX(flipX) {
-      return (this.$.flipX = flipX);
+    addExperience(amount) {
+      this.experience += amount;
+
+      if (this.experience >= this.nextLevelXP) {
+        this.levelUp();
+      }
     }
 
-    setVelocityX(velocity) {
-      this.$.setVelocityX(velocity);
-    }
-    setVelocityY(velocity) {
-      this.$.setVelocityY(velocity);
-    }
-    setVelocity(velocity) {
-      this.$.setVelocity(velocity);
-    }
-    setGravity(x, y) {
-      this.$.setGravity(x, y);
+    levelUp() {
+      this.level++;
+      this.experience -= this.nextLevelXP;
+
+      this.nextLevelXP = Math.round(this.nextLevelXP * 1.5);
+
+      console.log(`Leveled up to level ${this.level}! Next level at ${this.nextLevelXP} XP.`);
     }
 
-    static takeDamage(amount) {
+    takeDamage(amount) {
       this.health -= amount;
 
       if (this.health <= 0) {
@@ -796,7 +854,7 @@ window.onload = () => {
       return false;
     }
 
-    static updateTexture(newTexture) {
+    updateTexture(newTexture) {
       this.setTexture(newTexture);
     }
   }
